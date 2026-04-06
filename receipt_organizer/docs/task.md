@@ -1,0 +1,35 @@
+# Receipt Organizer Task Checklist
+
+- [x] 1. Project Setup
+  - [x] Initialize project (Vanilla HTML/CSS/JS due to no Node.js)
+  - [x] Set up project structure and CSS resets
+- [x] 2. UI Foundation
+  - [x] Create layout and CSS design system (modern, vibrant, glassmorphism)
+  - [x] Build drag-and-drop file upload component
+- [x] 3. Data Management & Table Component
+  - [x] Define data structures for receipt and bank account entries
+  - [x] Build the main data table with required columns
+  - [x] Implement "Deposit Completed" checkbox and row highlighting logic
+- [x] 4. Edit Functionality
+  - [x] Implement edit mode (inline or modal) for modifying row data
+- [x] 5. OCR Integration (Mock)
+  - [x] Implement mock data extraction flow with loading animations
+  - [x] Connect upload to the table population
+- [x] 6. Polish
+  - [x] Improve responsiveness
+  - [x] Add CSV Export feature
+- [x] 7. Real OCR Integration (Gemini API)
+  - [x] Add API Key input UI and localStorage management
+  - [x] Implement base64 encoding for uploaded files
+  - [x] Connect fetch logic to Google Gemini API (gemini-1.5-flash)
+  - [x] Parse JSON response and populate the table
+- [x] 8. Secure Backend Migration
+  - [x] Remove API key modal from frontend
+  - [x] Create Vercel serverless function (`api/process-receipt.js`)
+  - [x] Update frontend fetch to communicate with backend
+  - [x] Provide deployment guide
+- [x] 9. Bank Statement & Direct Text Feature
+  - [x] Update UI with clear Bank Statement upload buttons
+  - [x] Add raw text input area for copy-pasted info
+  - [x] Update app.js logic to parse text via backend
+  - [x] Update backend API to handle raw text payloads
