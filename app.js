@@ -4,11 +4,21 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, serverTim
 import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
 
 // DOM Elements
-const dropZone = document.getElementById('drop-zone');
-const fileInput = document.getElementById('file-input');
+const inputForm = document.getElementById('input-form');
+const submitActions = document.getElementById('submit-actions');
+const btnAnalyze = document.getElementById('btn-analyze');
 const loadingIndicator = document.getElementById('loading-indicator');
 const tableBody = document.getElementById('table-body');
 const firebaseWarning = document.getElementById('firebase-warning');
+const firebaseWarningMsg = document.getElementById('firebase-warning-msg');
+const errorBanner = document.getElementById('error-banner');
+const errorMessage = document.getElementById('error-message');
+
+// Form Inputs
+const receiptImageInput = document.getElementById('receipt-image');
+const receiptTextInput = document.getElementById('receipt-text');
+const bankImageInput = document.getElementById('bank-image');
+const bankTextInput = document.getElementById('bank-text');
 
 // Edit Modal Elements
 const editModal = document.getElementById('edit-modal');
@@ -18,8 +28,6 @@ const btnCancel = document.getElementById('btn-cancel');
 // Firebase Initialization
 let app, db, storage;
 let isFirebaseConnected = false;
-
-// Mock local data if Firebase isn't set up yet
 let localData = [];
 
 try {
@@ -29,7 +37,7 @@ try {
         storage = getStorage(app);
         isFirebaseConnected = true;
         firebaseWarning.style.display = "none";
-        document.querySelector('.status-text').textContent = '실시간 연동 됨';
+        document.querySelector('.status-text').textContent = '실시간 연동 중';
         setupFirebaseRealtime();
     } else {
         firebaseWarning.style.display = "block";
@@ -40,86 +48,106 @@ try {
 } catch (error) {
     console.error("Firebase init error", error);
     firebaseWarning.style.display = "block";
-    firebaseWarning.innerHTML = `<h3>⚠️ Firebase 연결 오픈 에러</h3><p>${error.message}</p>`;
+    firebaseWarningMsg.innerHTML = `Firebase 연결 에러: ${error.message}`;
+}
+
+function showError(msg) {
+    errorMessage.textContent = msg;
+    errorBanner.classList.remove('hidden');
+    console.error("App Error:", msg);
+}
+
+function convertToBase64(file) {
+    if(!file) return null;
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = error => reject(error);
+    });
 }
 
 // ==========================================
-// File Upload & OCR Extraction
+// Process & Submit Action
 // ==========================================
+btnAnalyze.addEventListener('click', async () => {
+    // 1. Gather Inputs
+    const receiptFile = receiptImageInput.files[0];
+    const receiptText = receiptTextInput.value.trim();
+    const bankFile = bankImageInput.files[0];
+    const bankText = bankTextInput.value.trim();
 
-// Drag & Drop
-dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZone.classList.add('dragover');
-});
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZone.classList.remove('dragover');
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-        handleFile(e.dataTransfer.files[0]);
-    }
-});
-
-fileInput.addEventListener('change', (e) => {
-    if (e.target.files && e.target.files[0]) {
-        handleFile(e.target.files[0]);
-    }
-});
-
-async function handleFile(file) {
-    if (!file.type.startsWith('image/')) {
-        alert('이미지 파일만 업로드 가능합니다.');
-        return;
+    if (!receiptFile && !receiptText && !bankFile && !bankText) {
+         showError("최소한 하나의 영수증 또는 계좌 정보를 입력해주세요 (사진 또는 텍스트).");
+         return;
     }
 
+    // Hide errors, show loading
+    errorBanner.classList.add('hidden');
+    inputForm.style.display = 'none';
+    submitActions.style.display = 'none';
     loadingIndicator.classList.remove('hidden');
-    dropZone.style.display = 'none';
 
     try {
-        let attachmentUrl = "";
+        let receiptAttachmentUrl = "";
+        let bankAttachmentUrl = "";
         
-        // 1. Upload exactly to Firebase Storage if connected
+        // 2. Upload to Firebase Storage
         if (isFirebaseConnected) {
-            const fileName = `receipts/${Date.now()}_${file.name}`;
-            const storageRef = ref(storage, fileName);
-            await uploadBytes(storageRef, file);
-            attachmentUrl = await getDownloadURL(storageRef);
+            try {
+                if (receiptFile) {
+                    const rRef = ref(storage, `receipts/receipt_${Date.now()}_${receiptFile.name}`);
+                    await uploadBytes(rRef, receiptFile);
+                    receiptAttachmentUrl = await getDownloadURL(rRef);
+                }
+                if (bankFile) {
+                    const bRef = ref(storage, `receipts/bank_${Date.now()}_${bankFile.name}`);
+                    await uploadBytes(bRef, bankFile);
+                    bankAttachmentUrl = await getDownloadURL(bRef);
+                }
+            } catch (storageErr) {
+                throw new Error("사진 업로드 중 권한 거부 또는 네트워크 오류가 발생했습니다. Storage 규칙을 확인하세요. (" + storageErr.message + ")");
+            }
         }
 
-        // 2. Convert file to Base64 to send to Vercel API for Gemini OCR
-        const base64Image = await convertToBase64(file);
+        // 3. Convert to Base64 for Gemini API
+        const receiptBase64 = receiptFile ? await convertToBase64(receiptFile) : null;
+        const bankBase64 = bankFile ? await convertToBase64(bankFile) : null;
 
-        // 3. Request API (simulated or real depending on deployment)
-        // If API fails locally, we provide mock generated data
+        // 4. Send Multi-Modal Payload to Vercel API
+        const payload = {
+            receiptBase64,
+            receiptText,
+            bankBase64,
+            bankText
+        };
+
+        const currentHost = window.location.hostname;
+        if (currentHost === "localhost" || currentHost === "127.0.0.1" || currentHost === "") {
+            console.warn("로컬 환경이므로 임의의 데이터 모형을 생성합니다 (실제 API는 Vercel에 올려야 작동합니다)");
+        }
+
         let extractedData;
         try {
             const apiRes = await fetch('/api/extract-receipt', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageBase64: base64Image })
+                body: JSON.stringify(payload)
             });
-            if (apiRes.ok) {
-                extractedData = await apiRes.json();
-            } else {
-                throw new Error("API call failed");
+
+            if (!apiRes.ok) {
+                const errorData = await apiRes.json().catch(()=>({error: '알 수 없는 서버 응답'}));
+                throw new Error(`API 통신 실패: ${errorData.error || apiRes.statusText}`);
             }
+
+            extractedData = await apiRes.json();
+            
         } catch (apiErr) {
-            console.warn("API Call Failed, using fallback mock data. If deployed, make sure /api/extract-receipt exists.", apiErr);
-            extractedData = {
-                date: new Date().toISOString().split('T')[0],
-                company: "테스트가게",
-                details: "테스트 물품 외 1건",
-                supplyValue: 10000,
-                tax: 1000,
-                totalAmount: 11000,
-                bankName: "국민은행",
-                accountNumber: "123-456-7890",
-                accountOwner: "홍길동"
-            };
+            console.error("API Fetch Error:", apiErr);
+            throw new Error(`/api/extract-receipt 통신 중 오류가 발생했습니다. 환경변수 GEMINI_API_KEY가 등록되어 있는지 확인해주세요.\n[상세 내역: ${apiErr.message}]`);
         }
 
-        // 4. Transform data structure
+        // 5. Structure Firestore Document
         const docData = {
             docId: `DOC-${Math.floor(Math.random() * 10000)}`,
             date: extractedData.date || "",
@@ -131,60 +159,67 @@ async function handleFile(file) {
             bankName: extractedData.bankName || "",
             accountNumber: extractedData.accountNumber || "",
             accountOwner: extractedData.accountOwner || "",
-            attachmentUrl: attachmentUrl,
+            receiptAttachmentUrl: receiptAttachmentUrl,
+            bankAttachmentUrl: bankAttachmentUrl,
             paid: false,
             createdAt: isFirebaseConnected ? serverTimestamp() : new Date().toISOString()
         };
 
-        // 5. Save to Firestore
+        // 6. Save to Realtime Database
         if (isFirebaseConnected) {
-            await addDoc(collection(db, "receipts"), docData);
+            try {
+                await addDoc(collection(db, "receipts"), docData);
+            } catch (dbErr) {
+                throw new Error("데이터베이스(Firestore) 등록 실패. 데이터베이스 권한(Rules)을 확인하세요. (" + dbErr.message + ")");
+            }
         } else {
-            // Local mockup
             docData.id = Date.now().toString();
             localData.push(docData);
             renderTable();
         }
 
-    } catch (err) {
-        console.error(err);
-        alert('처리 중 에러가 발생했습니다: ' + err.message);
-    } finally {
-        loadingIndicator.classList.add('hidden');
-        dropZone.style.display = 'block';
-        fileInput.value = '';
-    }
-}
+        // Reset Inputs on Success
+        receiptImageInput.value = '';
+        receiptTextInput.value = '';
+        bankImageInput.value = '';
+        bankTextInput.value = '';
 
-function convertToBase64(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => resolve(reader.result.split(',')[1]);
-        reader.onerror = error => reject(error);
-    });
-}
+    } catch (err) {
+        showError(err.message);
+    } finally {
+        // Unblock UI
+        loadingIndicator.classList.add('hidden');
+        inputForm.style.display = 'grid';
+        submitActions.style.display = 'block';
+    }
+});
 
 // ==========================================
 // Data Binding & Table Rendering
 // ==========================================
 
 function setupFirebaseRealtime() {
-    const q = query(collection(db, "receipts"), orderBy("createdAt", "desc"));
-    onSnapshot(q, (snapshot) => {
-        localData = [];
-        snapshot.forEach((docSnap) => {
-            localData.push({ id: docSnap.id, ...docSnap.data() });
+    try {
+        const q = query(collection(db, "receipts"), orderBy("createdAt", "desc"));
+        onSnapshot(q, (snapshot) => {
+            localData = [];
+            snapshot.forEach((docSnap) => {
+                localData.push({ id: docSnap.id, ...docSnap.data() });
+            });
+            renderTable();
+        }, (err) => {
+            showError("실시간 데이터베이스 읽기 권한이 없습니다. Firestore 규칙을 확인해주세요: " + err.message);
         });
-        renderTable();
-    });
+    } catch(err) {
+        showError("Firestore 쿼리 실행 에러: " + err.message);
+    }
 }
 
 function renderTable() {
     tableBody.innerHTML = '';
     
     if (localData.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="13" style="text-align: center; color: #6b7280;">등록된 내역이 없습니다. 사진을 업로드해 주세요.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="14" style="text-align: center; color: #6b7280;">등록된 내역이 없습니다. 정보를 입력하고 등록해주세요.</td></tr>`;
         return;
     }
 
@@ -192,8 +227,7 @@ function renderTable() {
         const tr = document.createElement('tr');
         if (item.paid) tr.classList.add('paid');
 
-        // Number Formatting
-        const formatMoney = (n) => new Intl.NumberFormat('ko-KR').format(n);
+        const formatMoney = (n) => new Intl.NumberFormat('ko-KR').format(n || 0);
 
         tr.innerHTML = `
             <td>${item.docId || '-'}</td>
@@ -206,9 +240,8 @@ function renderTable() {
             <td>${item.bankName || '-'}</td>
             <td>${item.accountNumber || '-'}</td>
             <td>${item.accountOwner || '-'}</td>
-            <td>
-                ${item.attachmentUrl ? `<a href="${item.attachmentUrl}" target="_blank" class="btn-download">다운로드</a>` : '-'}
-            </td>
+            <td>${item.receiptAttachmentUrl ? `<a href="${item.receiptAttachmentUrl}" target="_blank" class="btn-download">영수증</a>` : '-'}</td>
+            <td>${item.bankAttachmentUrl ? `<a href="${item.bankAttachmentUrl}" target="_blank" class="btn-download">계좌</a>` : '-'}</td>
             <td>
                 <button class="btn secondary btn-edit" data-id="${item.id}">수정</button>
             </td>
@@ -219,23 +252,25 @@ function renderTable() {
 
         tableBody.appendChild(tr);
 
-        // Events for this row
+        // Events
         const rowId = item.id;
-        
-        // Edit Button (Or double click on row)
         tr.querySelector('.btn-edit').addEventListener('click', () => openEditModal(rowId));
         tr.addEventListener('dblclick', (e) => {
-            if(e.target.type !== 'checkbox' && !e.target.classList.contains('btn-edit')) {
+            if(e.target.type !== 'checkbox' && !e.target.classList.contains('btn-edit') && e.target.tagName !== 'A') {
                 openEditModal(rowId);
             }
         });
 
-        // Paid Checkbox logic
         tr.querySelector('.paid-checkbox').addEventListener('change', async (e) => {
             const isChecked = e.target.checked;
             if (isFirebaseConnected) {
-                const docRef = doc(db, "receipts", rowId);
-                await updateDoc(docRef, { paid: isChecked });
+                try {
+                    const docRef = doc(db, "receipts", rowId);
+                    await updateDoc(docRef, { paid: isChecked });
+                } catch(dbErr) {
+                    showError("지급 상태 변경 실패: " + dbErr.message);
+                    e.target.checked = !isChecked; // revert
+                }
             } else {
                 const idx = localData.findIndex(x => x.id == rowId);
                 if(idx > -1) localData[idx].paid = isChecked;
@@ -288,8 +323,12 @@ editForm.addEventListener('submit', async (e) => {
     };
 
     if (isFirebaseConnected) {
-        const docRef = doc(db, "receipts", id);
-        await updateDoc(docRef, updatedData);
+        try {
+            const docRef = doc(db, "receipts", id);
+            await updateDoc(docRef, updatedData);
+        } catch(dbErr) {
+            showError("수정 사항 저장 실패: " + dbErr.message);
+        }
     } else {
         const idx = localData.findIndex(x => x.id === id);
         if(idx > -1) {

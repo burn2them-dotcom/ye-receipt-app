@@ -18,33 +18,69 @@
             <div class="header-right">
                 <div class="status-indicator">
                     <span class="status-dot"></span>
-                    <span class="status-text">실시간 연동 중...</span>
+                    <span class="status-text">연결 대기 중...</span>
                 </div>
             </div>
         </header>
 
         <main class="main-content">
-            <!-- Firebase Setup Warning (Hidden when connected) -->
+            <!-- Firebase Setup Warning -->
             <div id="firebase-warning" class="alert-box" style="display: none;">
-                <h3>⚠️ Firebase 데이터베이스 연결 필요</h3>
-                <p>현재 로컬 디버그 모드로 실행 중입니다. 실시간 공유 기능을 사용하려면 프로젝트 연동이 필요합니다.</p>
+                <h3>⚠️ Firebase 연결 상태 알림</h3>
+                <p id="firebase-warning-msg">현재 로컬 디버그 모드로 실행 중입니다.</p>
+            </div>
+
+            <!-- Error Banner for unhandled exceptions -->
+            <div id="error-banner" class="alert-box error hidden">
+                <h3>❌ 오류 발생</h3>
+                <p id="error-message"></p>
+                <button class="btn secondary" style="margin-top: 10px;" onclick="document.getElementById('error-banner').classList.add('hidden')">닫기</button>
             </div>
 
             <!-- Upload Section -->
             <section class="upload-section glass-panel">
-                <div class="upload-area" id="drop-zone">
-                    <div class="upload-icon">📸</div>
-                    <h3>영수증 또는 계좌 정보 업로드</h3>
-                    <p>이미지를 드래그하거나 클릭하여 첨부하세요.</p>
-                    <input type="file" id="file-input" accept="image/*" style="display: none;">
-                    <div class="upload-buttons">
-                        <button class="btn primary" onclick="document.getElementById('file-input').click()">사진 선택</button>
+                <div class="section-title">
+                    <h2>신규 내역 등록</h2>
+                    <p>영수증과 계좌정보를 입력해주세요. 사진이나 문자(텍스트) 모두 가능합니다.</p>
+                </div>
+
+                <div class="multi-input-form" id="input-form">
+                    
+                    <!-- Receipt Input Box -->
+                    <div class="input-card">
+                        <h3>🧾 영수증 입력</h3>
+                        <div class="input-group">
+                            <label>사진 첨부</label>
+                            <input type="file" id="receipt-image" accept="image/*" class="file-input-ui">
+                        </div>
+                        <div class="input-group">
+                            <label>내용 직접 입력 (선택)</label>
+                            <textarea id="receipt-text" placeholder="영수증 사진이 없다면 구매 내용과 금액 등을 복사해서 붙여넣으세요." rows="3"></textarea>
+                        </div>
                     </div>
+
+                    <!-- Bank Acc Input Box -->
+                    <div class="input-card">
+                        <h3>🏦 계좌정보 입력</h3>
+                        <div class="input-group">
+                            <label>사진 첨부</label>
+                            <input type="file" id="bank-image" accept="image/*" class="file-input-ui">
+                        </div>
+                        <div class="input-group">
+                            <label>내용 직접 입력 (선택)</label>
+                            <textarea id="bank-text" placeholder="계좌번호나 예금주 정보가 적힌 문자를 붙여넣으세요." rows="3"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="submit-actions" id="submit-actions">
+                    <button class="btn primary btn-large" id="btn-analyze">💎 AI 분석 및 데이터 등록하기</button>
                 </div>
                 
                 <div id="loading-indicator" class="loading-container hidden">
                     <div class="spinner"></div>
-                    <p>AI가 데이터를 분석 중입니다. 잠시만 기다려주세요...</p>
+                    <h3 style="color:var(--primary-color);">AI가 데이터를 분석 중입니다...</h3>
+                    <p>파일 용량과 API 통신 상태에 따라 약 5~15초 정도 소요될 수 있습니다. 창을 닫지 마세요.</p>
                 </div>
             </section>
 
@@ -70,7 +106,8 @@
                                 <th>은행명</th>
                                 <th>계좌번호</th>
                                 <th>예금주</th>
-                                <th>첨부파일</th>
+                                <th>영수증 첨부</th>
+                                <th>계좌 첨부</th>
                                 <th>수정</th>
                                 <th>지급여부</th>
                             </tr>
