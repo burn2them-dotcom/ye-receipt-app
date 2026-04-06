@@ -67,6 +67,16 @@ function convertToBase64(file) {
     });
 }
 
+// Timeout Wrapper to prevent infinite hanging (Firebase Storage retries or slow networks)
+function withTimeout(promise, ms, timeoutMessage) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(timeoutMessage)), ms);
+        promise
+            .then(res => { clearTimeout(timer); resolve(res); })
+            .catch(err => { clearTimeout(timer); reject(err); });
+    });
+}
+
 // ==========================================
 // Process & Submit Action
 // ==========================================
@@ -92,21 +102,21 @@ btnAnalyze.addEventListener('click', async () => {
         let receiptAttachmentUrl = "";
         let bankAttachmentUrl = "";
         
-        // 2. Upload to Firebase Storage
+        // 2. Upload to Firebase Storage with Timeout (10 seconds max)
         if (isFirebaseConnected) {
             try {
                 if (receiptFile) {
                     const rRef = ref(storage, `receipts/receipt_${Date.now()}_${receiptFile.name}`);
-                    await uploadBytes(rRef, receiptFile);
+                    await withTimeout(uploadBytes(rRef, receiptFile), 10000, "영수증 이미지 업로드 시간 초과 (Firebase Storage 권한 문제 의심)");
                     receiptAttachmentUrl = await getDownloadURL(rRef);
                 }
                 if (bankFile) {
                     const bRef = ref(storage, `receipts/bank_${Date.now()}_${bankFile.name}`);
-                    await uploadBytes(bRef, bankFile);
+                    await withTimeout(uploadBytes(bRef, bankFile), 10000, "계좌 이미지 업로드 시간 초과 (Firebase Storage 권한 문제 의심)");
                     bankAttachmentUrl = await getDownloadURL(bRef);
                 }
             } catch (storageErr) {
-                throw new Error("사진 업로드 중 권한 거부 또는 네트워크 오류가 발생했습니다. Storage 규칙을 확인하세요. (" + storageErr.message + ")");
+                throw new Error("사진 파일 저장 실패! Firebase Storage [설정] 혹은 [규칙] 탭에서 테스트 모드가 켜져 있는지 확인하세요. (" + storageErr.message + ")");
             }
         }
 
@@ -129,22 +139,23 @@ btnAnalyze.addEventListener('click', async () => {
 
         let extractedData;
         try {
-            const apiRes = await fetch('/api/extract-receipt', {
+            const fetchPromise = fetch('/api/extract-receipt', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            const apiRes = await withTimeout(fetchPromise, 15000, "AI 데이터 추출 응답 시간 초과 (15초 지연)");
 
             if (!apiRes.ok) {
                 const errorData = await apiRes.json().catch(()=>({error: '알 수 없는 서버 응답'}));
-                throw new Error(`API 통신 실패: ${errorData.error || apiRes.statusText}`);
+                throw new Error(`API 오류: ${errorData.error || apiRes.statusText}`);
             }
 
             extractedData = await apiRes.json();
             
         } catch (apiErr) {
             console.error("API Fetch Error:", apiErr);
-            throw new Error(`/api/extract-receipt 통신 중 오류가 발생했습니다. 환경변수 GEMINI_API_KEY가 등록되어 있는지 확인해주세요.\n[상세 내역: ${apiErr.message}]`);
+            throw new Error(`데이터 추출 실패! Vercel의 GEMINI_API_KEY가 환경변수에 정확히 입력되었는지 확인해주세요.\n[상세 내용: ${apiErr.message}]`);
         }
 
         // 5. Structure Firestore Document
